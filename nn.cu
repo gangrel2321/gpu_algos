@@ -1,6 +1,9 @@
 #include <driver_types.h>
 #include <iostream>
 #include <cassert>
+#include <curand.h>
+#include <curand_kernel.h>
+#include <cuda_runtime.h>
 /**
  * @brief Foward NN Propagation
  * Cuda accelerated in-place NN-propagation 
@@ -26,6 +29,9 @@ __global__ void forward(float* input_t, float* w, float* b, float* Z, int layer_
     }
 }
 
+
+// ------------ Activations ------------
+
 __global__ void relu(int w, int h, float* input, float* output){
     int col = blockIdx.x*blockDim.x + threadIdx.x;
     int row = blockIdx.y*blockDim.y + threadIdx.y; 
@@ -33,6 +39,17 @@ __global__ void relu(int w, int h, float* input, float* output){
         float activation = input[row*w + col];
         output[row*w + col] = activation > 0.f ? activation : 0.f; 
     }
+}
+
+__global__ void relu_backwards(int w, int h, float* a, float* d_l, float* b)
+{
+  int column = blockIdx.x*blockDim.x + threadIdx.x;
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  if (row < h && column < w)
+  {
+    float activation = a[row*w+column];
+    b[row*w+column] = activation > 0.f ? d_l[row*w+column] : 0.f;
+  }
 }
 
 __global__ void softmax(int w, int h, float* input, float* output){
@@ -49,4 +66,50 @@ __global__ void softmax(int w, int h, float* input, float* output){
         }
         output[row*w + col] = exp(input[row*w + col] - maxval)/(divisor);
     }
+}
+
+// ------------- Losses ---------------
+
+/**
+ * @brief Cross Entropy Loss
+ * Cuda accelerated cross entropy loss
+ * 
+ * @param preds Predicted data probs (n x m) 
+ * @param data True data labels (n x m)
+ * @param output Loss output 
+ * @param n height of input matrices
+ * @param m width of input matrices
+*/
+__global__ void cross_entropy(float* preds, float* data, float* output, int n, int m){
+    int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if (i < n){
+        float loss = 0.f;
+        for(int j = 0; j<m; j++){
+            loss -= data[i*m + j] * log(max(1e-7, preds[i*m + j]));
+        }
+        output[i] = loss;
+    }
+}
+
+__global__ void cross_entropy_backwards(float* preds, float* data, float* output, int n, int m){
+    int i = blockIdx.x*blockDim.x + threadIdx.x; 
+    int j = blockIdx.y*blockDim.y + threadIdx.y; 
+    if (i < n && j < m){
+        output[i*m + j] = preds[i*m + j] - data[i*m + j];
+    }
+}
+
+// -------- Layer Initialization -----------
+
+
+__global__ void init_rand(int w, int h, float* mat)
+{
+  int column = blockIdx.x*blockDim.x + threadIdx.x;
+  int row = blockIdx.y*blockDim.y + threadIdx.y;
+  if (row < h && column < w)
+  {
+    curandState state;
+    curand_init(42, row*w+column, 0, &state);
+    mat[row*w + column] = curand_normal(&state)*sqrtf(2.f/h);
+  }
 }
