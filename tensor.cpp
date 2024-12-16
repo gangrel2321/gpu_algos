@@ -12,7 +12,7 @@ class Node {
 class DifferentiableOp {
 public: 
 
-    virtual DifferentiableOp* backprop(DifferentiableOp* x) const = 0;
+    virtual std::shared_ptr<DifferentiableOp> backprop(std::shared_ptr<DifferentiableOp> x) const = 0;
     virtual double eval() const = 0;
     virtual std::string toString() const = 0;
     virtual ~DifferentiableOp() = default;
@@ -26,8 +26,8 @@ private:
 public:
     explicit Constant(double val) : value(val) {}
     
-    Constant* backprop(DifferentiableOp* x) const override {
-        return new Constant(0);
+    std::shared_ptr<DifferentiableOp> backprop(std::shared_ptr<DifferentiableOp> x) const override {
+        return std::make_shared<Constant>(0);
     }
 
     double eval() const override {
@@ -50,8 +50,8 @@ private:
 public:
     explicit Variable(std::string name, double val = 0) : name(name), value(val) {}
     
-    Constant* backprop(DifferentiableOp* x) const override {
-        return x == this ? new Constant(0) : new Constant(1);
+    std::shared_ptr<DifferentiableOp> backprop(std::shared_ptr<DifferentiableOp> x) const override {
+        return x.get() == this ? std::make_shared<Constant>(1) : std::make_shared<Constant>(0);
     }
 
     double eval() const override {
@@ -66,16 +66,16 @@ public:
     ~Variable() override = default;
 };
 
-class Sum : public DifferentiableOp { 
+class Add : public DifferentiableOp { 
 private:
-    DifferentiableOp* x; 
-    DifferentiableOp* y;
+    std::shared_ptr<DifferentiableOp> x; 
+    std::shared_ptr<DifferentiableOp> y;
 
 public:
-    explicit Sum(DifferentiableOp* x, DifferentiableOp* y) : x(x), y(y) {}
+    explicit Add(std::shared_ptr<DifferentiableOp> x, std::shared_ptr<DifferentiableOp> y) : x(x), y(y) {}
     
-    Sum* backprop(DifferentiableOp* var) const override {
-        return new Sum(x->backprop(var), y->backprop(var));
+    std::shared_ptr<DifferentiableOp> backprop(std::shared_ptr<DifferentiableOp> var) const override {
+        return std::make_shared<Add>(x->backprop(var), y->backprop(var));
     }
 
     double eval() const override {
@@ -87,5 +87,5 @@ public:
     }
 
     // Destructor
-    ~Sum() override = default;
+    ~Add() override = default;
 };
