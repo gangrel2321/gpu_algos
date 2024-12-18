@@ -2,67 +2,43 @@
 #include <memory>
 #include <string>
 
-class DifferentiableOp;
-class Add;
-class Prod;
-class Constant;
+class Variable;
 
-class DifferentiableOp {
+template <class T>
+class Node {
 public: 
 
-    virtual DifferentiableOp backprop(Variable& x) const {
-        return Constant(0); 
+    virtual double backprop(Node<Variable>& x) {
+        return static_cast<T*>(this)->backprop(x); 
     };
     virtual double eval() const {
-        return 0;
+        return static_cast<const T*>(this)->eval();
     };
     virtual std::string toString() const {
-        return "GenericDifferentiableOp";
+        return static_cast<const T*>(this)->toString();
     };
-    virtual ~DifferentiableOp() = default;
-
-    Add operator+(const DifferentiableOp& other){
-        return Add(*this, other);
+    T cast() const {
+        return *static_cast<const T*>(this); 
     }
-    Prod operator*(const DifferentiableOp& other){
-        return Prod(*this, other);
-    }
+    virtual ~Node() = default;
 
 };
 
-class Constant : public DifferentiableOp {
-private:
-    double value; 
+class Variable : public Node<Variable> { 
 
-public:
-    explicit Constant(double val) : value(val) {}
-    
-    DifferentiableOp backprop(Variable& x) const override {
-        return Constant(0);
-    }
-
-    double eval() const override {
-        return value;
-    }
-
-    std::string toString() const override {
-        return std::to_string(value);
-    }
-    // Destructor
-    ~Constant() override = default;
-
-};
-
-class Variable : public DifferentiableOp { 
-private:
-    double value; 
-    std::string name;
-
+double value; 
+std::string name;
 public:
     explicit Variable(std::string name, double val = 0) : name(name), value(val) {}
     
-    DifferentiableOp backprop(Variable& x) const override {
-        return x.name == name ? Constant(1) : Constant(0);
+    double backprop(Node<Variable>& x) override {
+        try {
+            Variable& var_ref = dynamic_cast<Variable&>(x);
+            return var_ref.name == name ? 1.0 : 0.0;
+        }
+        catch (const std::bad_cast& e){
+            return 0.0;
+        }
     }
 
     double eval() const override {
@@ -77,49 +53,71 @@ public:
     ~Variable() override = default;
 };
 
-class Add : public DifferentiableOp { 
+class Constant : public Node<Constant> {
 private:
-    DifferentiableOp x; 
-    DifferentiableOp y;
+    double value; 
 
 public:
-    explicit Add(DifferentiableOp x, DifferentiableOp y) : x(x), y(y) {}
+    explicit Constant(double val) : value(val) {}
     
-    DifferentiableOp backprop(Variable& var) const override {
-        return Add(x.backprop(var), y.backprop(var));
+    double backprop(Node<Variable>& x) override {
+        return 0.0;
     }
 
     double eval() const override {
-        return x.eval() + y.eval();
+        return value;
     }
 
     std::string toString() const override {
-        return x.toString() + " + " + y.toString();
+        return std::to_string(value);
+    }
+    // Destructor
+    ~Constant() override = default;
+
+};
+template <typename U, typename V>
+class Add : public Node<Add<U,V>> { 
+private:
+    Node<U>& x; 
+    Node<V>& y;
+
+public:
+    explicit Add(Node<U>& x, Node<V>& y) : x(x), y(y) {}
+    
+    double backprop(Node<Variable>& var) override {
+        return x.cast().backprop(var) + y.cast().backprop(var);
+    }
+
+    double eval() const override {
+        return x.cast().eval() + y.cast().eval();
+    }
+
+    std::string toString() const override {
+        return x.cast().toString() + " + " + y.cast().toString();
     }
 
     // Destructor
     ~Add() override = default;
 };
 
-class Prod : public DifferentiableOp { 
+template <typename U, typename V>
+class Prod : public Node<Prod<U,V>> { 
 private:
-    DifferentiableOp x; 
-    DifferentiableOp y;
+    Node<U>& x; 
+    Node<V>& y;
 public:
-    explicit Prod(DifferentiableOp x, DifferentiableOp y) : x(x), y(y) {}
+    explicit Prod(Node<U>& x, Node<V>& y) : x(x), y(y) {}
     
-    DifferentiableOp backprop(Variable& var) const override {
-        return Add(
-            Prod(x.backprop(var),y), Prod(x, y.backprop(var))
-        );
+    double backprop(Node<Variable>& var) override {
+        return x.cast().backprop(var)*y.cast().eval() + x.cast().eval()*y.cast().backprop(var);
     }
 
     double eval() const override {
-        return x.eval() * y.eval();
+        return x.cast().eval() * y.cast().eval();
     }
 
     std::string toString() const override {
-        return x.toString() + " * " + y.toString();
+        return x.cast().toString() + " * " + y.cast().toString();
     }
 
     // Destructor
@@ -129,7 +127,16 @@ public:
 
 int main() {
     Variable x = Variable("x",3);
-    Variable y = Variable("y",2);
-    DifferentiableOp z = (x*x) + (Constant(3)*x*y) + Constant(1);
-    std::cout << z.toString() << std::endl;
+    Variable y = Variable("y",5);
+    Variable p = Variable("p",0);
+    Prod a = Prod(x,y);
+    Constant b = Constant(22);
+    auto z = Add(x,a);
+    auto c = Add(z, b);
+    
+    std::cout << "TEST" << std::endl;
+    std::cout << "Reverse Diff: " << c.backprop(x) << std::endl;
+    std::cout << "Eval: " << c.eval() << std::endl;
+    // Node z = (x*x) + (Constant(3)*x*y) + Constant(1);
+    // std::cout << z.toString() << std::endl;
 }
